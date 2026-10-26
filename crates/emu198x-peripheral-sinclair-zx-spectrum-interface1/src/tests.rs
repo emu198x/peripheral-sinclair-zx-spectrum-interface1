@@ -17,12 +17,11 @@ fn interface() -> Interface1 {
 
 /// Ten sectors where every byte is its offset within the sector, plus
 /// the sector number, so any byte read back can be placed.
-fn image(write_protected: bool) -> MdrImage {
-    let mut bytes: Vec<u8> = (0..10 * SECTOR_LEN)
+fn image(write_protected: bool) -> MicrodriveTape {
+    let bytes: Vec<u8> = (0..10 * SECTOR_LEN)
         .map(|i| ((i % SECTOR_LEN) as u8).wrapping_add((i / SECTOR_LEN) as u8))
         .collect();
-    bytes.push(u8::from(write_protected));
-    MdrImage::parse(&bytes).expect("ten sectors")
+    MicrodriveTape::new(bytes, write_protected).expect("ten sectors")
 }
 
 /// Shifts one bit along the drive chain: `on` starts drive 1's motor.

@@ -55,8 +55,10 @@
 //! trap addresses and register map. The status bits are active low, as
 //! Fuse has them and the Interface 1 ROM expects.
 
-use common_sinclair_zx_spectrum::peripheral::{MemoryIntercept, Peripheral};
-use format_sinclair_zx_spectrum_mdr::{HEADER_LEN, MdrImage, SECTOR_LEN};
+use emu198x_bus_sinclair_zx_spectrum::{MemoryIntercept, Peripheral};
+
+mod tape;
+pub use tape::{DATA_LEN, HEADER_LEN, MAX_SECTORS, MIN_SECTORS, MicrodriveTape, SECTOR_LEN};
 
 /// The size of the shadow ROM.
 pub const INTERFACE1_ROM_BYTES: usize = 0x2000;
@@ -105,7 +107,7 @@ struct Cartridge {
 }
 
 impl Cartridge {
-    fn from_image(image: &MdrImage, formatted: bool) -> Self {
+    fn from_image(image: &MicrodriveTape, formatted: bool) -> Self {
         let state = if formatted { SYNC_OK } else { 0 };
         let mut preamble = vec![0; 512];
         for sector in 0..image.sector_count() {
@@ -113,18 +115,17 @@ impl Cartridge {
             preamble[256 + sector] = state;
         }
         Self {
-            data: image.data().to_vec(),
+            data: image.sectors().to_vec(),
             write_protected: image.write_protected,
             preamble,
             modified: !formatted,
         }
     }
 
-    fn to_image(&self) -> MdrImage {
-        let mut bytes = self.data.clone();
-        bytes.push(u8::from(self.write_protected));
-        // The data came from a valid image and never changes length.
-        MdrImage::parse(&bytes).unwrap_or_else(|_| MdrImage::blank(self.data.len() / SECTOR_LEN))
+    fn to_image(&self) -> MicrodriveTape {
+        // The data came from a valid tape and never changes length.
+        MicrodriveTape::new(self.data.clone(), self.write_protected)
+            .unwrap_or_else(|| MicrodriveTape::blank(self.data.len() / SECTOR_LEN))
     }
 }
 
@@ -381,7 +382,7 @@ impl Interface1 {
     /// Puts a cartridge in drive `drive` (0 to 7), replacing any there.
     /// An image read from a file is taken to be formatted. Returns
     /// `false` if there is no such drive.
-    pub fn insert(&mut self, drive: usize, image: &MdrImage) -> bool {
+    pub fn insert(&mut self, drive: usize, image: &MicrodriveTape) -> bool {
         self.insert_cartridge(drive, Cartridge::from_image(image, true))
     }
 
@@ -390,7 +391,7 @@ impl Interface1 {
     pub fn insert_blank(&mut self, drive: usize, sectors: usize) -> bool {
         self.insert_cartridge(
             drive,
-            Cartridge::from_image(&MdrImage::blank(sectors), false),
+            Cartridge::from_image(&MicrodriveTape::blank(sectors), false),
         )
     }
 
@@ -405,7 +406,7 @@ impl Interface1 {
     }
 
     /// Takes the cartridge out of drive `drive`, returning its image.
-    pub fn eject(&mut self, drive: usize) -> Option<MdrImage> {
+    pub fn eject(&mut self, drive: usize) -> Option<MicrodriveTape> {
         let slot = self.drives.get_mut(drive)?;
         let image = slot.cartridge.take()?.to_image();
         slot.head_pos = 0;
@@ -414,7 +415,7 @@ impl Interface1 {
 
     /// The image of the cartridge in drive `drive`, as it is now.
     #[must_use]
-    pub fn cartridge(&self, drive: usize) -> Option<MdrImage> {
+    pub fn cartridge(&self, drive: usize) -> Option<MicrodriveTape> {
         self.drives
             .get(drive)?
             .cartridge
